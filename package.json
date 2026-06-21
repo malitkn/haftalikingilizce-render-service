@@ -1,0 +1,15 @@
+{
+  "name": "render-service",
+  "version": "1.0.0",
+  "description": "Microservice for HTML to Image/Video rendering",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.0",
+    "puppeteer-core": "^22.0.0",
+    "puppeteer-screen-recorder": "^3.0.0",
+    "axios": "^1.7.0"
+  }
+}
