@@ -49,10 +49,20 @@ app.post('/render-image', async (req, res) => {
             executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium'
         });
         const page = await browser.newPage();
-        await page.setViewport({ width, height });
+        await page.setViewport({ width, height, deviceScaleFactor: 1 });
         await page.goto(html_url, { waitUntil: 'networkidle0' });
         
-        const buffer = await page.screenshot({ type: 'jpeg', quality: 90 });
+        // Wait a bit to ensure CSS/Fonts are fully applied
+        await new Promise(r => setTimeout(r, 500));
+        
+        // Try to capture the specific element to avoid viewport/background size issues
+        let buffer;
+        const cardElement = await page.$('.instagram-post') || await page.$('#card-container');
+        if (cardElement) {
+            buffer = await cardElement.screenshot({ type: 'jpeg', quality: 90 });
+        } else {
+            buffer = await page.screenshot({ type: 'jpeg', quality: 90 });
+        }
         await browser.close();
 
         res.set('Content-Type', 'image/jpeg');
