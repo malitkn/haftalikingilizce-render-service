@@ -11,6 +11,9 @@ const execPromise = util.promisify(exec);
 const app = express();
 app.use(express.json());
 
+// Health check endpoint (Before API key check)
+app.get('/health', (req, res) => res.json({ status: 'ok' }));
+
 // Security middleware
 const API_KEY = process.env.API_KEY || 'test-key';
 app.use((req, res, next) => {
@@ -20,9 +23,6 @@ app.use((req, res, next) => {
     }
     next();
 });
-
-// Health check endpoint
-app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
 // URL Whitelist
 const ALLOWED_HOSTS = ['haftalikingilizce.alacatimanav.me'];
