@@ -21,10 +21,26 @@ app.use((req, res, next) => {
     next();
 });
 
+// Health check endpoint
+app.get('/health', (req, res) => res.json({ status: 'ok' }));
+
+// URL Whitelist
+const ALLOWED_HOSTS = ['haftalikingilizce.alacatimanav.me'];
+
+function isUrlAllowed(url) {
+    try {
+        const { hostname } = new URL(url);
+        return ALLOWED_HOSTS.includes(hostname);
+    } catch {
+        return false;
+    }
+}
+
 // Endpoint 1: render-image
 app.post('/render-image', async (req, res) => {
     const { html_url, width = 1080, height = 1350 } = req.body;
     if (!html_url) return res.status(400).json({ error: 'html_url is required' });
+    if (!isUrlAllowed(html_url)) return res.status(403).json({ error: 'URL not allowed' });
 
     let browser;
     try {
@@ -58,8 +74,15 @@ app.post('/render-video', async (req, res) => {
             return res.status(400).json({ error: 'image_urls must be a non-empty array' });
         }
         
-        const workDir = fs.mkdtempSync(path.join('/tmp', 'carousel-'));
+        for (const url of image_urls) {
+            if (!isUrlAllowed(url)) {
+                return res.status(403).json({ error: `URL not allowed: ${url}` });
+            }
+        }
+        
+        let workDir;
         try {
+            workDir = fs.mkdtempSync(path.join('/tmp', 'carousel-'));
             // Download all images
             for (let i = 0; i < image_urls.length; i++) {
                 const url = image_urls[i];
@@ -83,10 +106,10 @@ app.post('/render-video', async (req, res) => {
             // Audio and transition logic can be added here in Faz 3
 
             res.sendFile(outputFile, (err) => {
-                fs.rmSync(workDir, { recursive: true, force: true });
+                if (workDir) fs.rmSync(workDir, { recursive: true, force: true });
             });
         } catch (error) {
-            fs.rmSync(workDir, { recursive: true, force: true });
+            if (workDir) fs.rmSync(workDir, { recursive: true, force: true });
             console.error(error);
             res.status(500).json({ error: error.message });
         }
@@ -94,6 +117,7 @@ app.post('/render-video', async (req, res) => {
     else if (mode === 'reveal') {
         const { html_url, width = 1080, height = 1920, duration_seconds = 9, audio_url, transition = 'none' } = req.body;
         if (!html_url) return res.status(400).json({ error: 'html_url is required for reveal mode' });
+        if (!isUrlAllowed(html_url)) return res.status(403).json({ error: 'URL not allowed' });
 
         const outputFile = path.join('/tmp', `reveal_${Date.now()}.mp4`);
         let browser;
@@ -113,6 +137,9 @@ app.post('/render-video', async (req, res) => {
             });
 
             await recorder.start(outputFile);
+            await page.evaluate(() => {
+                if (typeof window.startReveal === 'function') window.startReveal();
+            });
             await new Promise(r => setTimeout(r, duration_seconds * 1000));
             await recorder.stop();
             await browser.close();
