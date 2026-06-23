@@ -74,6 +74,34 @@ app.post('/render-image', async (req, res) => {
     }
 });
 
+async function muxAudioIfPresent(videoPath, audioUrl, tmpDir, needsReEncodeIfNoAudio) {
+    if (!audioUrl) {
+        if (needsReEncodeIfNoAudio) {
+            const muxedOutput = videoPath.replace('.mp4', '_final.mp4');
+            const muxCmd = `ffmpeg -y -i ${videoPath} -c:v libx264 -pix_fmt yuv420p ${muxedOutput}`;
+            await execPromise(muxCmd);
+            return muxedOutput;
+        }
+        return videoPath;
+    }
+
+    const audioPath = path.join(tmpDir, `audio_${Date.now()}.mp3`);
+    const response = await axios({ url: audioUrl, responseType: 'stream' });
+    await new Promise((resolve, reject) => {
+        const writer = fs.createWriteStream(audioPath);
+        response.data.pipe(writer);
+        writer.on('finish', resolve);
+        writer.on('error', reject);
+    });
+
+    const muxedOutput = videoPath.replace('.mp4', '_final.mp4');
+    const muxCmd = `ffmpeg -y -i ${videoPath} -stream_loop -1 -i ${audioPath} -map 0:v -map 1:a -c:v libx264 -pix_fmt yuv420p -c:a aac -b:a 128k -shortest ${muxedOutput}`;
+    await execPromise(muxCmd);
+
+    if (fs.existsSync(audioPath)) fs.unlinkSync(audioPath);
+    return muxedOutput;
+}
+
 // Endpoint 2: render-video
 app.post('/render-video', async (req, res) => {
     const { mode } = req.body;
@@ -113,9 +141,10 @@ app.post('/render-video', async (req, res) => {
             const cmd = `ffmpeg -y -framerate ${framerate} -i ${workDir}/frame_%03d.jpg -vf "fps=30,format=yuv420p" -c:v libx264 -pix_fmt yuv420p ${outputFile}`;
             await execPromise(cmd);
 
-            // Audio and transition logic can be added here in Faz 3
+            const finalAudioUrl = audio_url || process.env.DEFAULT_AUDIO_URL;
+            const finalOutput = await muxAudioIfPresent(outputFile, finalAudioUrl, workDir, false);
 
-            res.sendFile(outputFile, (err) => {
+            res.sendFile(finalOutput, (err) => {
                 if (workDir) fs.rmSync(workDir, { recursive: true, force: true });
             });
         } catch (error) {
@@ -129,16 +158,22 @@ app.post('/render-video', async (req, res) => {
         if (!html_url) return res.status(400).json({ error: 'html_url is required for reveal mode' });
         if (!isUrlAllowed(html_url)) return res.status(403).json({ error: 'URL not allowed' });
 
-        const outputFile = path.join('/tmp', `reveal_${Date.now()}.mp4`);
         let browser;
+        let workDir;
         try {
+            workDir = fs.mkdtempSync(path.join('/tmp', 'reveal-'));
+            const outputFile = path.join(workDir, `reveal.mp4`);
+
             browser = await puppeteer.launch({ 
                 args: ['--no-sandbox', '--disable-setuid-sandbox'],
                 executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium'
             });
             const page = await browser.newPage();
             await page.setViewport({ width, height });
+            
             await page.goto(html_url, { waitUntil: 'networkidle0' });
+            await page.evaluate(() => document.fonts.ready);
+            await new Promise(r => setTimeout(r, 300));
 
             const recorder = new PuppeteerScreenRecorder(page, {
                 fps: 30,
@@ -148,20 +183,32 @@ app.post('/render-video', async (req, res) => {
 
             await recorder.start(outputFile);
             await page.evaluate(() => {
+                window.__revealComplete = false;
                 if (typeof window.startReveal === 'function') window.startReveal();
             });
-            await new Promise(r => setTimeout(r, duration_seconds * 1000));
+
+            const maxWaitMs = (duration_seconds || 15) * 1000;
+            const pollIntervalMs = 200;
+            const startTime = Date.now();
+
+            while (Date.now() - startTime < maxWaitMs) {
+                const isComplete = await page.evaluate(() => window.__revealComplete === true);
+                if (isComplete) break;
+                await new Promise(r => setTimeout(r, pollIntervalMs));
+            }
+
             await recorder.stop();
             await browser.close();
 
-            // Audio logic can be added here in Faz 3
+            const finalAudioUrl = audio_url || process.env.DEFAULT_AUDIO_URL;
+            const finalOutput = await muxAudioIfPresent(outputFile, finalAudioUrl, workDir, true);
 
-            res.sendFile(outputFile, (err) => {
-                if (fs.existsSync(outputFile)) fs.unlinkSync(outputFile);
+            res.sendFile(finalOutput, (err) => {
+                if (workDir) fs.rmSync(workDir, { recursive: true, force: true });
             });
         } catch (error) {
             if (browser) await browser.close();
-            if (fs.existsSync(outputFile)) fs.unlinkSync(outputFile);
+            if (workDir) fs.rmSync(workDir, { recursive: true, force: true });
             console.error(error);
             res.status(500).json({ error: error.message });
         }
