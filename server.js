@@ -25,7 +25,7 @@ app.use((req, res, next) => {
 });
 
 // URL Whitelist
-const ALLOWED_HOSTS = ['haftalikingilizce.alacatimanav.me'];
+const ALLOWED_HOSTS = ['haftalikingilizce.alacatimanav.me', 'via.placeholder.com'];
 
 function isUrlAllowed(url) {
     if (url.startsWith('data:')) return true;
@@ -80,7 +80,7 @@ async function muxAudioIfPresent(videoPath, audioUrl, tmpDir, needsReEncodeIfNoA
     if (!audioUrl) {
         if (needsReEncodeIfNoAudio) {
             const muxedOutput = videoPath.replace('.mp4', '_final.mp4');
-            const muxCmd = `ffmpeg -y -i ${videoPath} -c:v libx264 -pix_fmt yuv420p ${muxedOutput}`;
+            const muxCmd = `ffmpeg -y -i ${videoPath} -c:v libx264 -preset ultrafast -pix_fmt yuv420p ${muxedOutput}`;
             await execPromise(muxCmd);
             return muxedOutput;
         }
@@ -88,7 +88,12 @@ async function muxAudioIfPresent(videoPath, audioUrl, tmpDir, needsReEncodeIfNoA
     }
 
     const audioPath = path.join(tmpDir, `audio_${Date.now()}.mp3`);
-    const response = await axios({ url: audioUrl, responseType: 'stream' });
+    let response;
+    try {
+        response = await axios({ url: audioUrl, responseType: 'stream' });
+    } catch (err) {
+        throw new Error(`Audio download failed for URL: ${audioUrl} - ${err.message}`);
+    }
     await new Promise((resolve, reject) => {
         const writer = fs.createWriteStream(audioPath);
         response.data.pipe(writer);
@@ -97,7 +102,7 @@ async function muxAudioIfPresent(videoPath, audioUrl, tmpDir, needsReEncodeIfNoA
     });
 
     const muxedOutput = videoPath.replace('.mp4', '_final.mp4');
-    const muxCmd = `ffmpeg -y -i ${videoPath} -stream_loop -1 -i ${audioPath} -map 0:v -map 1:a -c:v libx264 -pix_fmt yuv420p -c:a aac -b:a 128k -shortest ${muxedOutput}`;
+    const muxCmd = `ffmpeg -y -i ${videoPath} -stream_loop -1 -i ${audioPath} -map 0:v -map 1:a -c:v libx264 -preset ultrafast -pix_fmt yuv420p -c:a aac -b:a 128k -shortest ${muxedOutput}`;
     await execPromise(muxCmd);
 
     if (fs.existsSync(audioPath)) fs.unlinkSync(audioPath);
@@ -140,7 +145,7 @@ app.post('/render-video', async (req, res) => {
             const framerate = `1/${duration_per_image}`;
             
             // Generate video
-            const cmd = `ffmpeg -y -framerate ${framerate} -i ${workDir}/frame_%03d.jpg -vf "fps=30,format=yuv420p" -c:v libx264 -pix_fmt yuv420p ${outputFile}`;
+            const cmd = `ffmpeg -y -framerate ${framerate} -i ${workDir}/frame_%03d.jpg -vf "fps=30,format=yuv420p" -c:v libx264 -preset ultrafast -pix_fmt yuv420p ${outputFile}`;
             await execPromise(cmd);
 
             const finalAudioUrl = audio_url || process.env.DEFAULT_AUDIO_URL;
