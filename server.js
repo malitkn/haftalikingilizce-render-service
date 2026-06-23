@@ -28,6 +28,7 @@ app.use((req, res, next) => {
 const ALLOWED_HOSTS = ['haftalikingilizce.alacatimanav.me'];
 
 function isUrlAllowed(url) {
+    if (url.startsWith('data:')) return true;
     try {
         const { hostname } = new URL(url);
         return ALLOWED_HOSTS.includes(hostname);
@@ -49,6 +50,7 @@ app.post('/render-image', async (req, res) => {
             executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium'
         });
         const page = await browser.newPage();
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
         await page.setViewport({ width, height, deviceScaleFactor: 1 });
         await page.goto(html_url, { waitUntil: 'networkidle0' });
         
@@ -169,6 +171,7 @@ app.post('/render-video', async (req, res) => {
                 executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium'
             });
             const page = await browser.newPage();
+            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
             await page.setViewport({ width, height });
             
             await page.goto(html_url, { waitUntil: 'networkidle0' });
